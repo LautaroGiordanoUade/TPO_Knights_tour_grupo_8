@@ -23,3 +23,4 @@ El proyecto busca comparar o implementar una o más de estas estrategias para re
 - Entorno de desarrollo: **IntelliJ IDEA**
 - Control de versiones: **Git + GitHub**
 
+## Ejecución del programa
