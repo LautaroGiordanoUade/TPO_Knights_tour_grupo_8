@@ -14,7 +14,7 @@ public class Tour {
     /** Matriz interna con el orden de visita: order[row][col] = paso (1..N) o 0 si no visitado */
     private final int[][] knightMoveOrderMatrix;
 
-    // ========= Aliases de compatibilidad (para código existente) =========
+    // ========= Alias de compatibilidad (para código existente) =========
     /** Alias público para compatibilidad con código que usa tour.orden[r][c] */
     public final int[][] orden;
 

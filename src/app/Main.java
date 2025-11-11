@@ -3,6 +3,6 @@ package app;
 
 public class Main {
     public static void main(String[] args) {
-        new ui.Menu().run();
+        new ui.Menu().show();
     }
 }

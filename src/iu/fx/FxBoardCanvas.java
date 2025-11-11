@@ -9,123 +9,174 @@ import javafx.scene.text.Font;
 import javafx.util.Duration;
 import model.Tour;
 
+/**
+ * Canvas del tablero con animación del caballo.
+ * - Tours clásicos: ruta numerada + caballo.
+ * - Caso DP (pasando pointsMatrix): además pinta los puntajes por celda y
+ *   muestra arriba, en una franja dedicada, el score acumulado y los movimientos hechos.
+ *
+ * Complejidad por frame: O(N^2).
+ */
 public class FxBoardCanvas extends Canvas {
 
     private final Tour tourToAnimate;
     private final long animationDelayMillis;
     private final boolean useWhiteKnightPiece;
+    private final int[][] pointsMatrixOrNull;   // solo DP (si null => clásico)
 
-    private final int boardSize;
-    private final int maxStepNumberInTour;
+    private final int n;
+    private final int maxStep; // = casillas visitadas en esta ruta (t+1)
 
-    private Timeline animationTimeline;
-    private int currentAnimationStep;
+    private Timeline timeline;
+    private int step; // step visible 1..maxStep
 
-    private static final int DEFAULT_CELL_PIXELS = 70;
+    private static final int CELL_PX = 70;
+    private static final int TOP_HUD_HEIGHT = 50; // espacio dedicado arriba para el HUD
 
-    public FxBoardCanvas(Tour tourToAnimate,
-                         long animationDelayMillis,
-                         boolean useWhiteKnightPiece) {
-        this.tourToAnimate = tourToAnimate;
-        this.animationDelayMillis = animationDelayMillis;
-        this.useWhiteKnightPiece = useWhiteKnightPiece;
+    // Tours clásicos
+    public FxBoardCanvas(Tour tour, long delayMs, boolean white) {
+        this(tour, delayMs, white, null);
+    }
 
-        this.boardSize = tourToAnimate.getBoardSize();
-        this.maxStepNumberInTour = computeMaxStepNumber(tourToAnimate);
+    // DP (con overlay de puntajes)
+    public FxBoardCanvas(Tour tour, long delayMs, boolean white, int[][] pointsMatrix) {
+        this.tourToAnimate = tour;
+        this.animationDelayMillis = delayMs;
+        this.useWhiteKnightPiece = white;
+        this.pointsMatrixOrNull = pointsMatrix;
 
-        double preferredSize = Math.min(900, Math.max(360, boardSize * DEFAULT_CELL_PIXELS));
-        setWidth(preferredSize);
-        setHeight(preferredSize);
+        this.n = tour.getBoardSize();
+        this.maxStep = computeMaxStepNumber(tour);
 
-        this.animationTimeline = new Timeline();
-        KeyFrame keyFrame = new KeyFrame(Duration.millis(Math.max(10, animationDelayMillis)), e -> {
-            this.currentAnimationStep = Math.min(this.currentAnimationStep + 1, this.maxStepNumberInTour);
-            drawCurrentFrame();
-            if (this.currentAnimationStep >= this.maxStepNumberInTour) {
-                this.animationTimeline.stop();
-            }
+        // Si es modo DP, añadimos espacio arriba para el HUD
+        double baseSize = Math.min(900, Math.max(360, n * CELL_PX));
+        double totalHeight = baseSize + (pointsMatrixOrNull != null ? TOP_HUD_HEIGHT : 0);
+        setWidth(baseSize);
+        setHeight(totalHeight);
+
+        timeline = new Timeline();
+        KeyFrame kf = new KeyFrame(Duration.millis(Math.max(10, animationDelayMillis)), e -> {
+            if (step < maxStep) step++;
+            draw();
+            if (step >= maxStep) timeline.stop();
         });
-        this.animationTimeline.getKeyFrames().add(keyFrame);
-        this.animationTimeline.setCycleCount(Timeline.INDEFINITE);
+        timeline.getKeyFrames().add(kf);
+        timeline.setCycleCount(Timeline.INDEFINITE);
 
-        this.currentAnimationStep = 0;
-        drawCurrentFrame();
+        this.step = 1;      // <<< arranca en 1 para que se vea el caballo desde el inicio
+        draw();
     }
 
     public double getPreferredWidth()  { return getWidth(); }
     public double getPreferredHeight() { return getHeight(); }
+    public void startAnimation() { timeline.playFromStart(); }
+    public void restartAnimation() { step = 1; draw(); timeline.stop(); timeline.playFromStart(); }
 
-    public void startAnimation() { animationTimeline.playFromStart(); }
-
-    /** Reinicia la animación desde el paso 0 y vuelve a reproducir. */
-    public void restartAnimation() {
-        this.currentAnimationStep = 0;
-        drawCurrentFrame();
-        animationTimeline.stop();
-        animationTimeline.playFromStart();
-    }
-
-    private void drawCurrentFrame() {
+    // ---- dibujo por frame ----
+    private void draw() {
         GraphicsContext g = getGraphicsContext2D();
         g.setFill(Color.WHITE);
         g.fillRect(0, 0, getWidth(), getHeight());
 
-        int cellSizePixels = (int) Math.floor(Math.min(getWidth(), getHeight()) / boardSize);
-        int leftPaddingPixels = (int) ((getWidth()  - cellSizePixels * boardSize) / 2);
-        int topPaddingPixels  = (int) ((getHeight() - cellSizePixels * boardSize) / 2);
+        // Calcular posición del tablero (más abajo si hay HUD)
+        int cell = (int) Math.floor(Math.min(getWidth(), getWidth()) / n);
+        int left = (int) ((getWidth() - cell * n) / 2);
+        int top = (pointsMatrixOrNull != null) ? TOP_HUD_HEIGHT :
+                (int) ((getHeight() - cell * n) / 2);
 
-        int[][] orderMatrix = tourToAnimate.getKnightMoveOrderMatrix();
+        int[][] order = tourToAnimate.getKnightMoveOrderMatrix();
 
-        // Números del camino (gris claro)
+        // --- HUD superior (solo en modo DP) ---
+        if (pointsMatrixOrNull != null) {
+            long scoreSoFar = accumulatedScore(order, pointsMatrixOrNull, step);
+            String hudText = "Score acumulado: " + scoreSoFar
+                    + "   |   Movs: " + Math.max(0, step - 1) + "/" + (maxStep - 1);
+
+            // Fondo sutil para el HUD
+            g.setFill(Color.rgb(46, 204, 113, 0.12)); // verde muy transparente
+            g.fillRect(0, 0, getWidth(), TOP_HUD_HEIGHT);
+
+            g.setFill(Color.web("#27ae60")); // verde más oscuro que #2ecc71
+            g.setFont(Font.font(Math.max(16, cell * 0.30)));
+
+            // Centrado preciso
+            double textWidth = g.getFont().getSize() * hudText.length() * 0.6;
+            double textX = Math.max(10, (getWidth() - textWidth) / 2);
+            g.fillText(hudText, textX, TOP_HUD_HEIGHT - 15);
+        }
+
+        // (DP) puntajes por celda (overlay suave)
+        if (pointsMatrixOrNull != null) {
+            g.setFill(Color.rgb(0, 0, 0, 0.22));
+            g.setFont(Font.font(Math.max(11, cell * 0.22)));
+            for (int r = 0; r < n; r++)
+                for (int c = 0; c < n; c++) {
+                    String txt = Integer.toString(pointsMatrixOrNull[r][c]);
+                    double x = left + c * cell + cell * 0.12;
+                    double y = top  + r * cell + cell * 0.28;
+                    g.fillText(txt, x, y);
+                }
+        }
+
+        // Números de la ruta (gris)
         g.setFill(Color.GRAY);
-        g.setFont(Font.font(Math.max(12, cellSizePixels * 0.28)));
-        for (int rowIndex = 0; rowIndex < boardSize; rowIndex++) {
-            for (int colIndex = 0; colIndex < boardSize; colIndex++) {
-                int stepNumber = orderMatrix[rowIndex][colIndex];
-                if (stepNumber > 0) {
-                    String text = String.valueOf(stepNumber);
-                    double textX = leftPaddingPixels + colIndex * cellSizePixels + cellSizePixels * 0.35;
-                    double textY = topPaddingPixels  + rowIndex * cellSizePixels + cellSizePixels * 0.65;
-                    g.fillText(text, textX, textY);
+        g.setFont(Font.font(Math.max(12, cell * 0.28)));
+        for (int r = 0; r < n; r++)
+            for (int c = 0; c < n; c++) {
+                int s = order[r][c];
+                if (s > 0) {
+                    String txt = String.valueOf(s);
+                    double x = left + c * cell + cell * 0.35;
+                    double y = top  + r * cell + cell * 0.65;
+                    g.fillText(txt, x, y);
                 }
             }
-        }
 
         // Grid
         g.setStroke(Color.color(0.8, 0.8, 0.8));
-        for (int i = 0; i <= boardSize; i++) {
-            double x = leftPaddingPixels + i * cellSizePixels;
-            double y = topPaddingPixels  + i * cellSizePixels;
-            g.strokeLine(leftPaddingPixels, y, leftPaddingPixels + boardSize * cellSizePixels, y);
-            g.strokeLine(x, topPaddingPixels, x, topPaddingPixels + boardSize * cellSizePixels);
+        for (int i = 0; i <= n; i++) {
+            double x = left + i * cell;
+            double y = top  + i * cell;
+            g.strokeLine(left, y, left + n * cell, y);
+            g.strokeLine(x, top, x, top + n * cell);
         }
 
-        // Caballo
-        int[] currentKnightCell = findCellForStep(orderMatrix, Math.max(1, currentAnimationStep));
-        if (currentKnightCell != null) {
-            String knightGlyph = useWhiteKnightPiece ? "♘" : "♞";
+        // Caballo en la celda del step actual
+        int[] pos = findCellForStep(order, step);
+        if (pos != null) {
+            String glyph = useWhiteKnightPiece ? "♘" : "♞";
             g.setFill(Color.BLACK);
-            g.setFont(Font.font(Math.max(18, cellSizePixels * 0.6)));
-            double glyphX = leftPaddingPixels + currentKnightCell[1] * cellSizePixels + cellSizePixels * 0.28;
-            double glyphY = topPaddingPixels  + currentKnightCell[0] * cellSizePixels + cellSizePixels * 0.72;
-            g.fillText(knightGlyph, glyphX, glyphY);
+            g.setFont(Font.font(Math.max(18, cell * 0.6)));
+            double gx = left + pos[1] * cell + cell * 0.28;
+            double gy = top  + pos[0] * cell + cell * 0.72;
+            g.fillText(glyph, gx, gy);
         }
     }
 
-    private static int[] findCellForStep(int[][] orderMatrix, int stepNumber) {
-        int n = orderMatrix.length;
+    // ---- helpers ----
+    private static int[] findCellForStep(int[][] order, int s) {
+        int n = order.length;
         for (int r = 0; r < n; r++)
             for (int c = 0; c < n; c++)
-                if (orderMatrix[r][c] == stepNumber) return new int[]{r, c};
+                if (order[r][c] == s) return new int[]{r, c};
         return null;
     }
 
     private static int computeMaxStepNumber(Tour tour) {
-        int[][] order = tour.getKnightMoveOrderMatrix();
+        int[][] o = tour.getKnightMoveOrderMatrix();
         int max = 0;
-        for (int[] row : order)
-            for (int v : row)
-                if (v > max) max = v;
+        for (int[] row : o) for (int v : row) if (v > max) max = v;
         return Math.max(1, max);
+    }
+
+    private static long accumulatedScore(int[][] order, int[][] points, int lastStep) {
+        if (points == null || lastStep <= 0) return 0L;
+        int n = order.length; long total = 0L;
+        for (int r = 0; r < n; r++)
+            for (int c = 0; c < n; c++) {
+                int s = order[r][c];
+                if (s >= 1 && s <= lastStep) total += points[r][c];
+            }
+        return total;
     }
 }
