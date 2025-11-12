@@ -20,5 +20,6 @@ El proyecto busca comparar o implementar una o más de estas estrategias para re
 
 ## Tecnologías utilizadas
 - Lenguaje: **Java**
+- Requerimiento: **JavaFX** - https://gluonhq.com/products/javafx/
 - Entorno de desarrollo: **IntelliJ IDEA**
 - Control de versiones: **Git + GitHub**
